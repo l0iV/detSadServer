@@ -3,11 +3,17 @@ const db = require("../db/database");
 
 const router = Router();
 
-// GET /api/reviews — только одобренные
-router.get("/", (_req, res) => {
-  const rows = db
-    .prepare("SELECT * FROM reviews WHERE approved = 1 ORDER BY created_at DESC")
-    .all();
+// GET /api/reviews — все отзывы (для фронтенда берем approved=1, для админки — все)
+router.get("/", (req, res) => {
+  const { approved } = req.query;
+  let sql = "SELECT * FROM reviews";
+  const params = [];
+  if (approved !== undefined) {
+    sql += " WHERE approved = ?";
+    params.push(approved === "true" ? 1 : 0);
+  }
+  sql += " ORDER BY created_at DESC";
+  const rows = db.prepare(sql).all(...params);
   res.json(rows);
 });
 
@@ -22,6 +28,12 @@ router.post("/", (req, res) => {
   const result = db
     .prepare("INSERT INTO reviews (name, text, rating) VALUES (?, ?, ?)")
     .run(name, text, rating != null ? rating : 5);
+
+  // Уведомить бота о новом отзыве
+  try {
+    const { notifyNewReview } = require("../telegram-bot");
+    notifyNewReview(result.lastInsertRowid, name, text);
+  } catch (_) {}
 
   res.status(201).json({ id: result.lastInsertRowid, status: "pending" });
 });
