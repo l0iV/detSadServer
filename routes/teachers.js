@@ -4,33 +4,41 @@ const db = require("../db/database");
 const router = Router();
 
 // GET /api/teachers
-router.get("/", (_req, res) => {
-  const rows = db.prepare("SELECT * FROM teachers ORDER BY id").all();
-  res.json(rows);
+router.get("/", async (_req, res, next) => {
+  try {
+    const rows = await db.all("SELECT * FROM teachers ORDER BY id");
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
 });
 
 // POST /api/teachers
-router.post("/", (req, res) => {
-  const { name, position, experience, education, group_name, phone, image_url } = req.body;
-
-  if (!name || !position) {
-    return res.status(400).json({ error: "name и position обязательны" });
-  }
-
-  const result = db
-    .prepare(
+router.post("/", async (req, res, next) => {
+  try {
+    const { name, position, experience, education, group_name, phone, image_url } = req.body;
+    if (!name || !position) {
+      return res.status(400).json({ error: "name и position обязательны" });
+    }
+    const result = await db.run(
       `INSERT INTO teachers (name, position, experience, education, group_name, phone, image_url)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(name, position, experience, education, group_name, phone, image_url);
-
-  res.status(201).json({ id: result.lastInsertRowid });
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [name, position, experience || null, education || null, group_name || null, phone || null, image_url || null]
+    );
+    res.status(201).json({ id: result.lastID });
+  } catch (err) {
+    next(err);
+  }
 });
 
 // DELETE /api/teachers/:id
-router.delete("/:id", (req, res) => {
-  db.prepare("DELETE FROM teachers WHERE id = ?").run(req.params.id);
-  res.json({ ok: true });
+router.delete("/:id", async (req, res, next) => {
+  try {
+    await db.run("DELETE FROM teachers WHERE id = ?", [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
 });
 
 module.exports = router;

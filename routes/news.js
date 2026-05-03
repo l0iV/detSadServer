@@ -3,28 +3,41 @@ const db = require("../db/database");
 
 const router = Router();
 
-// GET /api/news – список новостей
-router.get("/", (_req, res) => {
-  const rows = db.prepare("SELECT * FROM news ORDER BY id").all();
-  res.json(rows);
-});
-
-// POST /api/news – добавить новость
-router.post("/", (req, res) => {
-  const { image_url, text } = req.body;
-  if (!text) {
-    return res.status(400).json({ error: "text обязателен" });
+// GET /api/news
+router.get("/", async (_req, res, next) => {
+  try {
+    const rows = await db.all("SELECT * FROM news ORDER BY id DESC");
+    res.json(rows);
+  } catch (err) {
+    next(err);
   }
-  const result = db
-    .prepare("INSERT INTO news (image_url, text) VALUES (?, ?)")
-    .run(image_url, text);
-  res.status(201).json({ id: result.lastInsertRowid });
 });
 
-// DELETE /api/news/:id – удалить новость
-router.delete("/:id", (req, res) => {
-  db.prepare("DELETE FROM news WHERE id = ?").run(req.params.id);
-  res.json({ ok: true });
+// POST /api/news
+router.post("/", async (req, res, next) => {
+  try {
+    const { text, image_url } = req.body;
+    if (!text) {
+      return res.status(400).json({ error: "text обязателен" });
+    }
+    const result = await db.run(
+      "INSERT INTO news (text, image_url) VALUES (?, ?)",
+      [text, image_url || null]
+    );
+    res.status(201).json({ id: result.lastID });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/news/:id
+router.delete("/:id", async (req, res, next) => {
+  try {
+    await db.run("DELETE FROM news WHERE id = ?", [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
 });
 
 module.exports = router;

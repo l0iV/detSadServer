@@ -1,22 +1,24 @@
 const { Router } = require("express");
 const db = require("../db/database");
+
 const router = Router();
 
-router.post("/", async (req, res) => {
-  const { name, phone, message } = req.body;
-
-  if (!name || !phone || !message) {
-    return res.status(400).json({ error: "Заполни все поля" });
-  }
-
-  if (!/^[\d\s\-()+]+$/.test(phone)) {
-    return res.status(400).json({ error: "Некорректный номер телефона" });
-  }
-
+// POST /api/contact — принять заявку
+router.post("/", async (req, res, next) => {
   try {
-    db.prepare(
-      "INSERT INTO contacts (name, phone, message) VALUES (?, ?, ?)"
-    ).run(name, phone, message);
+    const { name, phone, message } = req.body;
+
+    if (!name || !phone || !message) {
+      return res.status(400).json({ error: "Заполни все поля" });
+    }
+    if (!/^[\d\s\-()+]+$/.test(phone)) {
+      return res.status(400).json({ error: "Некорректный номер телефона" });
+    }
+
+    await db.run(
+      "INSERT INTO contacts (name, phone, message) VALUES (?, ?, ?)",
+      [name, phone, message]
+    );
 
     // Уведомление в Telegram
     try {
@@ -25,17 +27,19 @@ router.post("/", async (req, res) => {
     } catch (_) {}
 
     res.json({ ok: true, message: "Заявка принята!" });
-  } catch (error) {
-    console.error("Error:", error);
-    res.status(500).json({ error: "Ошибка сервера" });
+  } catch (err) {
+    next(err);
   }
 });
 
-router.get("/", (_req, res) => {
-  const rows = db
-    .prepare("SELECT * FROM contacts ORDER BY created_at DESC")
-    .all();
-  res.json(rows);
+// GET /api/contact — список заявок (для админки)
+router.get("/", async (_req, res, next) => {
+  try {
+    const rows = await db.all("SELECT * FROM contacts ORDER BY created_at DESC");
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
 });
 
 module.exports = router;
