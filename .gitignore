@@ -1,0 +1,68 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies
+node_modules
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build outputs
+dist
+dist-ssr
+build
+.out
+
+# Environment variables (ВАЖНО! - скрывает .env файлы с токенами)
+.env
+.env.local
+.env.production
+.env.development
+.env.test
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.remote-sync.json
+
+# Database files (если не хотите пушить БД)
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Uploads (если у вас есть папка с загруженными фото)
+public/uploads/
+public/static/uploads/
+uploads/
+
+# PM2 logs
+.pm2/
+
+# Environment specific
+*.env
+!.env.example

@@ -40,7 +40,6 @@ const requireAdmin = async (ctx, next) => {
 };
 
 // ── Состояния диалогов (в памяти) ─────────────────────────
-// { [userId]: { step, entity, data } }
 const sessions = {};
 
 const getSession = (userId) => sessions[userId] || null;
@@ -117,11 +116,9 @@ const mainMenu = () =>
     .text("👩‍🏫 Педагоги", "menu:teachers")
     .row()
     .text("🏆 Награды", "menu:wins")
-    .text("📰 Новости", "menu:news")
-    .row()
-    .text("⭐ Отзывы", "menu:reviews")
     .text("🏠 Кабинеты", "menu:rooms")
     .row()
+    .text("⭐ Отзывы", "menu:reviews")
     .text("📬 Заявки", "menu:contacts");
 
 bot.command("start", requireAdmin, async (ctx) => {
@@ -150,9 +147,8 @@ bot.callbackQuery(/^menu:(.+)$/, requireAdmin, async (ctx) => {
     events: showEventsMenu,
     teachers: showTeachersMenu,
     wins: showWinsMenu,
-    news: showNewsMenu,
-    reviews: showReviewsMenu,
     rooms: showRoomsMenu,
+    reviews: showReviewsMenu,
     contacts: showContactsMenu,
   };
 
@@ -386,79 +382,7 @@ bot.callbackQuery("wins:delete", requireAdmin, async (ctx) => {
 });
 
 // ══════════════════════════════════════════════════════════
-//  НОВОСТИ
-// ══════════════════════════════════════════════════════════
-
-async function showNewsMenu(ctx) {
-  const count = (await db.get("SELECT COUNT(*) AS c FROM news")).c;
-  const kb = new InlineKeyboard()
-    .text("📋 Список", "news:list")
-    .text("➕ Добавить", "news:add")
-    .row()
-    .text("❌ Удалить", "news:delete")
-    .row()
-    .text("⬅️ Назад", "back:main");
-
-  const text = `📰 *Новости*\nВсего: ${count}\n\nЧто сделать?`;
-  if (ctx.callbackQuery) {
-    await ctx.editMessageText(text, {
-      parse_mode: "Markdown",
-      reply_markup: kb,
-    });
-  } else {
-    await ctx.reply(text, { parse_mode: "Markdown", reply_markup: kb });
-  }
-}
-
-bot.callbackQuery("news:list", requireAdmin, async (ctx) => {
-  await ctx.answerCallbackQuery();
-  const rows = await db.all(
-    "SELECT id, text, image_url FROM news ORDER BY id DESC LIMIT 10",
-  );
-
-  if (rows.length === 0) {
-    await ctx.editMessageText("📭 Новостей пока нет", {
-      reply_markup: new InlineKeyboard().text("⬅️ Назад", "menu:news"),
-    });
-    return;
-  }
-
-  let msg = "📰 *Новости:*\n\n";
-  rows.forEach((n) => {
-    const img = n.image_url ? "🖼️ " : "";
-    msg += `*#${n.id}* ${img}${n.text.slice(0, 80)}...\n\n`;
-  });
-
-  await ctx.editMessageText(msg, {
-    parse_mode: "Markdown",
-    reply_markup: new InlineKeyboard()
-      .text("➕ Добавить", "news:add")
-      .text("❌ Удалить", "news:delete")
-      .row()
-      .text("⬅️ Назад", "menu:news"),
-  });
-});
-
-bot.callbackQuery("news:add", requireAdmin, async (ctx) => {
-  await ctx.answerCallbackQuery();
-  setSession(ctx.from.id, { entity: "news", step: "text", data: {} });
-  await ctx.editMessageText(
-    "📰 *Новая новость*\n\nШаг 1/2 — Введи *текст* новости:",
-    { parse_mode: "Markdown" },
-  );
-});
-
-bot.callbackQuery("news:delete", requireAdmin, async (ctx) => {
-  await ctx.answerCallbackQuery();
-  setSession(ctx.from.id, { entity: "news_delete", step: "id" });
-  await ctx.editMessageText(
-    "❌ Введи *ID новости* для удаления:\n(команда /menu для отмены)",
-    { parse_mode: "Markdown" },
-  );
-});
-
-// ══════════════════════════════════════════════════════════
-//  КАБИНЕТЫ / ЗАЛЫ
+//  КАБИНЕТЫ / ЗАЛЫ (бывшие новости)
 // ══════════════════════════════════════════════════════════
 
 async function showRoomsMenu(ctx) {
@@ -485,11 +409,11 @@ async function showRoomsMenu(ctx) {
 bot.callbackQuery("rooms:list", requireAdmin, async (ctx) => {
   await ctx.answerCallbackQuery();
   const rows = await db.all(
-    "SELECT id, name, description FROM rooms ORDER BY id",
+    "SELECT id, text, image_url FROM rooms ORDER BY id DESC LIMIT 10",
   );
 
   if (rows.length === 0) {
-    await ctx.editMessageText("📭 Кабинетов пока нет", {
+    await ctx.editMessageText("🏠 Кабинетов пока нет", {
       reply_markup: new InlineKeyboard().text("⬅️ Назад", "menu:rooms"),
     });
     return;
@@ -497,9 +421,8 @@ bot.callbackQuery("rooms:list", requireAdmin, async (ctx) => {
 
   let msg = "🏠 *Кабинеты и залы:*\n\n";
   rows.forEach((r) => {
-    msg += `*#${r.id}* ${r.name}\n`;
-    if (r.description) msg += `   ${r.description.slice(0, 60)}\n`;
-    msg += "\n";
+    const img = r.image_url ? "🖼️ " : "📝 ";
+    msg += `*#${r.id}* ${img}${r.text.substring(0, 80)}...\n\n`;
   });
 
   await ctx.editMessageText(msg, {
@@ -514,9 +437,9 @@ bot.callbackQuery("rooms:list", requireAdmin, async (ctx) => {
 
 bot.callbackQuery("rooms:add", requireAdmin, async (ctx) => {
   await ctx.answerCallbackQuery();
-  setSession(ctx.from.id, { entity: "room", step: "name", data: {} });
+  setSession(ctx.from.id, { entity: "room", step: "text", data: {} });
   await ctx.editMessageText(
-    "🏠 *Новый кабинет/зал*\n\nШаг 1/3 — Введи *название*:",
+    "🏠 *Новый кабинет/зал*\n\nШаг 1/2 — Введи *описание* кабинета:",
     { parse_mode: "Markdown" },
   );
 });
@@ -570,7 +493,6 @@ bot.callbackQuery("reviews:pending", requireAdmin, async (ctx) => {
     return;
   }
 
-  // Показываем первый отзыв с кнопками одобрить/удалить
   await showReviewCard(ctx, rows, 0, "edit");
 });
 
@@ -595,8 +517,20 @@ bot.callbackQuery("reviews:approved", requireAdmin, async (ctx) => {
 
   await ctx.editMessageText(msg, {
     parse_mode: "Markdown",
-    reply_markup: new InlineKeyboard().text("⬅️ Назад", "menu:reviews"),
+    reply_markup: new InlineKeyboard()
+      .text("🗑️ Удалить отзыв", "reviews:delete_approved")
+      .row()
+      .text("⬅️ Назад", "menu:reviews"),
   });
+});
+
+bot.callbackQuery("reviews:delete_approved", requireAdmin, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  setSession(ctx.from.id, { entity: "review_delete", step: "id" });
+  await ctx.editMessageText(
+    "❌ Введи *ID отзыва* для удаления:\n(команда /menu для отмены)",
+    { parse_mode: "Markdown" },
+  );
 });
 
 async function showReviewCard(ctx, rows, index, mode) {
@@ -729,7 +663,6 @@ bot.callbackQuery("contacts:delete", requireAdmin, async (ctx) => {
 bot.on("message:text", requireAdmin, async (ctx) => {
   const session = getSession(ctx.from.id);
 
-  // Нет активного сеанса → подсказка
   if (!session) {
     await ctx.reply("Используй /menu для открытия панели управления.");
     return;
@@ -737,71 +670,47 @@ bot.on("message:text", requireAdmin, async (ctx) => {
 
   const text = ctx.message.text.trim();
 
-  // Отмена
   if (text === "/menu" || text === "/start") {
     clearSession(ctx.from.id);
     await ctx.reply("Главное меню:", { reply_markup: mainMenu() });
     return;
   }
 
-  // ── Мероприятие ─────────────────────────────────────────
   if (session.entity === "event") {
     await handleEventStep(ctx, session, text);
     return;
   }
 
-  // ── Педагог ─────────────────────────────────────────────
   if (session.entity === "teacher") {
     await handleTeacherStep(ctx, session, text);
     return;
   }
 
-  // ── Награда ─────────────────────────────────────────────
   if (session.entity === "win") {
     await handleWinStep(ctx, session, text);
     return;
   }
 
-  // ── Новость ─────────────────────────────────────────────
-  if (session.entity === "news") {
-    await handleNewsStep(ctx, session, text);
-    return;
-  }
-
-  // ── Кабинет ─────────────────────────────────────────────
   if (session.entity === "room") {
     await handleRoomStep(ctx, session, text);
     return;
   }
 
-  // ── Удаления ────────────────────────────────────────────
-  if (session.entity === "event_delete") {
-    await deleteEntity(ctx, "events", text);
-    return;
-  }
-  if (session.entity === "teacher_delete") {
-    await deleteEntity(ctx, "teachers", text);
-    return;
-  }
-  if (session.entity === "win_delete") {
-    await deleteEntity(ctx, "wins", text);
-    return;
-  }
-  if (session.entity === "news_delete") {
-    await deleteEntity(ctx, "news", text);
-    return;
-  }
-  if (session.entity === "room_delete") {
-    await deleteEntity(ctx, "rooms", text);
-    return;
-  }
-  if (session.entity === "contact_delete") {
-    await deleteEntity(ctx, "contacts", text);
-    return;
+  // Удаления
+  const deleteHandlers = {
+    event_delete: () => deleteEntity(ctx, "events", text),
+    teacher_delete: () => deleteEntity(ctx, "teachers", text),
+    win_delete: () => deleteEntity(ctx, "wins", text),
+    room_delete: () => deleteEntity(ctx, "rooms", text),
+    contact_delete: () => deleteEntity(ctx, "contacts", text),
+    review_delete: () => deleteEntity(ctx, "reviews", text),
+  };
+
+  if (deleteHandlers[session.entity]) {
+    await deleteHandlers[session.entity]();
   }
 });
 
-// ── Универсальное удаление ──────────────────────────────
 async function deleteEntity(ctx, table, text) {
   const id = parseInt(text);
   if (isNaN(id)) {
@@ -813,19 +722,18 @@ async function deleteEntity(ctx, table, text) {
     events: "Мероприятие",
     teachers: "Педагог",
     wins: "Награда",
-    news: "Новость",
     rooms: "Кабинет",
     contacts: "Заявка",
+    reviews: "Отзыв",
   };
 
   const row = await db.get(`SELECT * FROM ${table} WHERE id = ?`, [id]);
   if (!row) {
-    await ctx.reply(`❌ Запись #${id} не найдена в таблице ${table}.`);
+    await ctx.reply(`❌ Запись #${id} не найдена.`);
     clearSession(ctx.from.id);
     return;
   }
 
-  // Удаляем файл если есть image_url
   if (row.image_url) {
     const filepath = path.join(
       __dirname,
@@ -902,7 +810,6 @@ async function handleEventStep(ctx, session, text) {
   }
 }
 
-// Выбор категории через кнопку
 bot.callbackQuery(/^evcat:(.+)$/, requireAdmin, async (ctx) => {
   const session = getSession(ctx.from.id);
   if (!session || session.entity !== "event") return;
@@ -918,7 +825,6 @@ bot.callbackQuery(/^evcat:(.+)$/, requireAdmin, async (ctx) => {
   );
 });
 
-// Сохранить без фото
 bot.callbackQuery("event:nophoto", requireAdmin, async (ctx) => {
   const session = getSession(ctx.from.id);
   if (!session || session.entity !== "event") return;
@@ -1009,7 +915,6 @@ async function handleTeacherStep(ctx, session, text) {
   const currentStep = TEACHER_STEPS.find((s) => s.key === session.step);
   if (!currentStep) return;
 
-  // Пропуск необязательного поля
   const value =
     text === "-" || text === "—" || text.toLowerCase() === "нет" ? null : text;
   session.data[currentStep.key] = value;
@@ -1148,75 +1053,18 @@ async function saveWin(ctx, data, imageUrl) {
 }
 
 // ══════════════════════════════════════════════════════════
-//  ПОШАГОВЫЙ ВВОД — НОВОСТЬ
-// ══════════════════════════════════════════════════════════
-
-async function handleNewsStep(ctx, session, text) {
-  if (session.step === "text") {
-    session.data.text = text;
-    session.step = "photo";
-    setSession(ctx.from.id, session);
-    await ctx.reply(
-      "Шаг 2/2 — Отправь *фото* к новости\n(или нажми «Без фото»):",
-      {
-        parse_mode: "Markdown",
-        reply_markup: new InlineKeyboard().text("📝 Без фото", "news:nophoto"),
-      },
-    );
-  }
-}
-
-bot.callbackQuery("news:nophoto", requireAdmin, async (ctx) => {
-  const session = getSession(ctx.from.id);
-  if (!session || session.entity !== "news") return;
-  await ctx.answerCallbackQuery();
-  await saveNews(ctx, session.data, null);
-});
-
-async function saveNews(ctx, data, imageUrl) {
-  try {
-    const result = await db.run(
-      "INSERT INTO news (text, image_url) VALUES (?, ?)",
-      [data.text, imageUrl],
-    );
-    clearSession(ctx.from.id);
-    await ctx.reply(
-      `🎉 *Новость добавлена!*\n\n🆔 ID: ${result.lastID}\n📰 ${data.text.slice(0, 100)}...`,
-      {
-        parse_mode: "Markdown",
-        reply_markup: new InlineKeyboard().text("⬅️ К новостям", "menu:news"),
-      },
-    );
-  } catch (err) {
-    console.error(err);
-    await ctx.reply("❌ Ошибка при сохранении новости");
-  }
-}
-
-// ══════════════════════════════════════════════════════════
-//  ПОШАГОВЫЙ ВВОД — КАБИНЕТ
+//  ПОШАГОВЫЙ ВВОД — КАБИНЕТ (rooms)
 // ══════════════════════════════════════════════════════════
 
 async function handleRoomStep(ctx, session, text) {
   const { step, data } = session;
 
-  if (step === "name") {
-    data.name = text;
-    session.step = "description";
-    setSession(ctx.from.id, session);
-    await ctx.reply(
-      "Шаг 2/3 — Введи *описание* кабинета\n(или «-» чтобы пропустить):",
-      { parse_mode: "Markdown" },
-    );
-    return;
-  }
-
-  if (step === "description") {
-    data.description = text === "-" || text === "нет" ? null : text;
+  if (step === "text") {
+    data.text = text;
     session.step = "photo";
     setSession(ctx.from.id, session);
     await ctx.reply(
-      "Шаг 3/3 — Отправь *фото* кабинета\n(или нажми «Без фото»):",
+      "Шаг 2/2 — Отправь *фото* кабинета\n(или нажми «Без фото»):",
       {
         parse_mode: "Markdown",
         reply_markup: new InlineKeyboard().text("📝 Без фото", "room:nophoto"),
@@ -1236,12 +1084,12 @@ bot.callbackQuery("room:nophoto", requireAdmin, async (ctx) => {
 async function saveRoom(ctx, data, imageUrl) {
   try {
     const result = await db.run(
-      "INSERT INTO rooms (name, description, image_url) VALUES (?, ?, ?)",
-      [data.name, data.description || null, imageUrl],
+      "INSERT INTO rooms (text, image_url) VALUES (?, ?)",
+      [data.text, imageUrl],
     );
     clearSession(ctx.from.id);
     await ctx.reply(
-      `🎉 *Кабинет добавлен!*\n\n🆔 ID: ${result.lastID}\n🏠 ${data.name}`,
+      `🎉 *Кабинет добавлен!*\n\n🆔 ID: ${result.lastID}\n🏠 ${data.text.substring(0, 100)}...`,
       {
         parse_mode: "Markdown",
         reply_markup: new InlineKeyboard().text("⬅️ К кабинетам", "menu:rooms"),
@@ -1260,25 +1108,22 @@ async function saveRoom(ctx, data, imageUrl) {
 bot.on("message:photo", requireAdmin, async (ctx) => {
   const session = getSession(ctx.from.id);
 
-  // Нет активного диалога — смотрим подпись
   if (!session) {
     const caption = ctx.message.caption || "";
-    // Ручное обновление фото: /img 5, /teacher 3, /win 2, /news 4, /room 1
-    const imgMatch = caption.match(/^\/(img|teacher|win|news|room)\s+(\d+)$/i);
+    const imgMatch = caption.match(/^\/(img|teacher|win|room)\s+(\d+)$/i);
     if (imgMatch) {
       const type = imgMatch[1].toLowerCase();
       const id = parseInt(imgMatch[2]);
       await handleManualPhotoUpdate(ctx, type, id);
     } else {
       await ctx.reply(
-        "Нет активного диалога. Используй /menu или укажи подпись: `/img ID`",
+        "Нет активного диалога. Используй /menu или укажи подпись: `/room ID`",
         { parse_mode: "Markdown" },
       );
     }
     return;
   }
 
-  // Активный диалог ожидает фото
   if (session.step !== "photo") {
     await ctx.reply(
       "Сейчас не ожидается фото. Следуй инструкциям или /menu для отмены.",
@@ -1291,7 +1136,6 @@ bot.on("message:photo", requireAdmin, async (ctx) => {
     event: "events",
     teacher: "teachers",
     win: "wins",
-    news: "events",
     room: "rooms",
   };
   const folder = folderMap[entity] || "static";
@@ -1311,10 +1155,6 @@ bot.on("message:photo", requireAdmin, async (ctx) => {
       await saveWin(ctx, data, imageUrl);
       return;
     }
-    if (entity === "news") {
-      await saveNews(ctx, data, imageUrl);
-      return;
-    }
     if (entity === "room") {
       await saveRoom(ctx, data, imageUrl);
       return;
@@ -1325,27 +1165,23 @@ bot.on("message:photo", requireAdmin, async (ctx) => {
   }
 });
 
-// Ручное обновление фото через подпись /img ID и т.д.
 async function handleManualPhotoUpdate(ctx, type, id) {
   const tableMap = {
     img: "events",
     teacher: "teachers",
     win: "wins",
-    news: "news",
     room: "rooms",
   };
   const folderMap = {
     img: "events",
     teacher: "teachers",
     win: "wins",
-    news: "events",
     room: "rooms",
   };
   const labelMap = {
     img: "Мероприятие",
     teacher: "Педагог",
     win: "Награда",
-    news: "Новость",
     room: "Кабинет",
   };
 

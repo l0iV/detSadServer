@@ -123,7 +123,7 @@ db.exec(
 )
   .then(() =>
     console.log(
-      "✅ Все 7 таблиц готовы (events, teachers, reviews, contacts, wins, news, rooms)",
+      "✅ Все 7 таблиц готовы (events, teachers, reviews, contacts, wins, rooms)",
     ),
   )
   .catch((err) => console.error("❌ Ошибка создания таблиц:", err.message));
