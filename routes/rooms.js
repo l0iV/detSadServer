@@ -16,13 +16,13 @@ router.get("/", async (_req, res, next) => {
 // POST /api/rooms
 router.post("/", async (req, res, next) => {
   try {
-    const { name, description, image_url } = req.body;
-    if (!name) {
-      return res.status(400).json({ error: "name обязателен" });
+    const { text, image_url } = req.body;
+    if (!text) {
+      return res.status(400).json({ error: "text обязателен" });
     }
     const result = await db.run(
-      "INSERT INTO rooms (name, description, image_url) VALUES (?, ?, ?)",
-      [name, description || null, image_url || null]
+      "INSERT INTO rooms (text, image_url) VALUES (?, ?)",
+      [text, image_url || null],
     );
     res.status(201).json({ id: result.lastID });
   } catch (err) {

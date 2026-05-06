@@ -16,14 +16,30 @@ router.get("/", async (_req, res, next) => {
 // POST /api/teachers
 router.post("/", async (req, res, next) => {
   try {
-    const { name, position, experience, education, group_name, phone, image_url } = req.body;
+    const {
+      name,
+      position,
+      experience,
+      education,
+      group_name,
+      phone,
+      image_url,
+    } = req.body;
     if (!name || !position) {
       return res.status(400).json({ error: "name и position обязательны" });
     }
     const result = await db.run(
       `INSERT INTO teachers (name, position, experience, education, group_name, phone, image_url)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [name, position, experience || null, education || null, group_name || null, phone || null, image_url || null]
+      [
+        name,
+        position,
+        experience || null,
+        education || null,
+        group_name || null,
+        phone || null,
+        image_url || null,
+      ],
     );
     res.status(201).json({ id: result.lastID });
   } catch (err) {

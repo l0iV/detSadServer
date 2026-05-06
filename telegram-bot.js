@@ -1,31 +1,13 @@
 /**
  * telegram-bot.js — Бот управления сайтом детского сада
- *
- * Управление через интерактивное меню с кнопками.
- * Для каждой сущности: список → добавить → удалить.
- * Загрузка фото прямо из чата.
  */
 
 const { Bot, InlineKeyboard } = require("grammy");
 const db = require("./db/database");
 const fs = require("fs");
 const path = require("path");
+const axios = require("axios");
 require("dotenv").config();
-
-// ── Прокси (для локальной разработки из РФ) ───────────────
-let botOptions = {};
-if (process.env.PROXY_URL) {
-  try {
-    const { ProxyAgent } = require("proxy-agent");
-    const agent = new ProxyAgent(process.env.PROXY_URL);
-    botOptions = { client: { baseFetchConfig: { agent } } };
-    console.log(`🛡️ Прокси: ${process.env.PROXY_URL}`);
-  } catch (e) {
-    console.log("⚠️ proxy-agent не доступен");
-  }
-}
-
-const bot = new Bot(process.env.BOT_TOKEN, botOptions);
 
 // ── Проверка администратора ────────────────────────────────
 const isAdmin = (ctx) =>
@@ -106,9 +88,72 @@ async function savePhoto(ctx, folder, prefix, entityId) {
   return `/static/${folder}/${filename}`;
 }
 
+// Сохранить файл документа из Telegram
+async function saveDocumentFile(ctx, docId) {
+  try {
+    if (!ctx.message.document) {
+      await ctx.reply("❌ Пожалуйста, отправь файл");
+      return null;
+    }
+
+    const document = ctx.message.document;
+    const fileId = document.file_id;
+    const fileName = document.file_name;
+    const mimeType = document.mime_type;
+
+    // Проверяем тип файла
+    const allowedTypes = [
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ];
+
+    if (!allowedTypes.includes(mimeType)) {
+      await ctx.reply(
+        "❌ Неподдерживаемый формат. Отправь файл в формате PDF, DOC или DOCX",
+      );
+      return null;
+    }
+
+    // Получаем файл
+    const file = await ctx.api.getFile(fileId);
+    const fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
+
+    // Создаём папку для документов если её нет
+    const docsDir = path.join(__dirname, "public", "documents");
+    if (!fs.existsSync(docsDir)) fs.mkdirSync(docsDir, { recursive: true });
+
+    // Сохраняем файл
+    const response = await axios({
+      method: "get",
+      url: fileUrl,
+      responseType: "stream",
+    });
+
+    const uniqueFileName = `${docId}_${Date.now()}_${fileName}`;
+    const filePath = path.join(docsDir, uniqueFileName);
+    const writer = fs.createWriteStream(filePath);
+
+    response.data.pipe(writer);
+
+    await new Promise((resolve, reject) => {
+      writer.on("finish", resolve);
+      writer.on("error", reject);
+    });
+
+    return `/static/documents/${uniqueFileName}`;
+  } catch (err) {
+    console.error("Ошибка сохранения файла:", err);
+    await ctx.reply("❌ Ошибка при сохранении файла");
+    return null;
+  }
+}
+
 // ══════════════════════════════════════════════════════════
 //  ГЛАВНОЕ МЕНЮ
 // ══════════════════════════════════════════════════════════
+
+const bot = new Bot(process.env.BOT_TOKEN);
 
 const mainMenu = () =>
   new InlineKeyboard()
@@ -118,7 +163,9 @@ const mainMenu = () =>
     .text("🏆 Награды", "menu:wins")
     .text("🏠 Кабинеты", "menu:rooms")
     .row()
+    .text("📄 Документы", "menu:documents")
     .text("⭐ Отзывы", "menu:reviews")
+    .row()
     .text("📬 Заявки", "menu:contacts");
 
 bot.command("start", requireAdmin, async (ctx) => {
@@ -148,6 +195,7 @@ bot.callbackQuery(/^menu:(.+)$/, requireAdmin, async (ctx) => {
     teachers: showTeachersMenu,
     wins: showWinsMenu,
     rooms: showRoomsMenu,
+    documents: showDocumentsMenu,
     reviews: showReviewsMenu,
     contacts: showContactsMenu,
   };
@@ -187,7 +235,6 @@ async function showEventsMenu(ctx) {
   }
 }
 
-// Список последних 10
 bot.callbackQuery("events:list", requireAdmin, async (ctx) => {
   await ctx.answerCallbackQuery();
   const rows = await db.all(
@@ -217,7 +264,6 @@ bot.callbackQuery("events:list", requireAdmin, async (ctx) => {
   });
 });
 
-// Начало добавления мероприятия
 bot.callbackQuery("events:add", requireAdmin, async (ctx) => {
   await ctx.answerCallbackQuery();
   setSession(ctx.from.id, { entity: "event", step: "title", data: {} });
@@ -227,7 +273,6 @@ bot.callbackQuery("events:add", requireAdmin, async (ctx) => {
   );
 });
 
-// Удаление мероприятия
 bot.callbackQuery("events:delete", requireAdmin, async (ctx) => {
   await ctx.answerCallbackQuery();
   setSession(ctx.from.id, { entity: "event_delete", step: "id" });
@@ -382,7 +427,7 @@ bot.callbackQuery("wins:delete", requireAdmin, async (ctx) => {
 });
 
 // ══════════════════════════════════════════════════════════
-//  КАБИНЕТЫ / ЗАЛЫ (бывшие новости)
+//  КАБИНЕТЫ / ЗАЛЫ
 // ══════════════════════════════════════════════════════════
 
 async function showRoomsMenu(ctx) {
@@ -449,6 +494,188 @@ bot.callbackQuery("rooms:delete", requireAdmin, async (ctx) => {
   setSession(ctx.from.id, { entity: "room_delete", step: "id" });
   await ctx.editMessageText(
     "❌ Введи *ID кабинета* для удаления:\n(команда /menu для отмены)",
+    { parse_mode: "Markdown" },
+  );
+});
+
+// ══════════════════════════════════════════════════════════
+//  ДОКУМЕНТЫ
+// ══════════════════════════════════════════════════════════
+
+async function showDocumentsMenu(ctx) {
+  const count = (
+    await db.get("SELECT COUNT(*) AS c FROM documents WHERE is_active = 1")
+  ).c;
+  const kb = new InlineKeyboard()
+    .text("📋 Список", "documents:list")
+    .text("➕ Добавить", "documents:add")
+    .row()
+    .text("✏️ Редактировать", "documents:edit")
+    .text("❌ Удалить", "documents:delete")
+    .row()
+    .text("⬅️ Назад", "back:main");
+
+  const text = `📄 *Документы*\nВсего в базе: ${count}\n\nЧто сделать?`;
+  if (ctx.callbackQuery) {
+    await ctx.editMessageText(text, {
+      parse_mode: "Markdown",
+      reply_markup: kb,
+    });
+  } else {
+    await ctx.reply(text, { parse_mode: "Markdown", reply_markup: kb });
+  }
+}
+
+bot.callbackQuery("documents:list", requireAdmin, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const docs = await db.all(
+    "SELECT id, title, icon, order_num, file_url FROM documents WHERE is_active = 1 ORDER BY order_num ASC",
+  );
+
+  if (docs.length === 0) {
+    await ctx.editMessageText("📭 Документов пока нет", {
+      reply_markup: new InlineKeyboard().text("⬅️ Назад", "menu:documents"),
+    });
+    return;
+  }
+
+  let msg = "📄 *Список документов:*\n\n";
+  docs.forEach((doc) => {
+    const hasFile = doc.file_url ? "📎" : "📄";
+    msg += `${doc.icon} *#${doc.id}* ${hasFile} ${doc.title}\n   📊 Порядок: ${doc.order_num}\n\n`;
+  });
+
+  await ctx.editMessageText(msg, {
+    parse_mode: "Markdown",
+    reply_markup: new InlineKeyboard()
+      .text("➕ Добавить", "documents:add")
+      .text("✏️ Редактировать", "documents:edit")
+      .row()
+      .text("⬅️ Назад", "menu:documents"),
+  });
+});
+
+bot.callbackQuery("documents:add", requireAdmin, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  setSession(ctx.from.id, { entity: "document", step: "title", data: {} });
+  await ctx.editMessageText(
+    "📄 *Новый документ*\n\nШаг 1/4 — Введи *название* документа:",
+    { parse_mode: "Markdown" },
+  );
+});
+
+bot.callbackQuery("documents:edit", requireAdmin, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const docs = await db.all(
+    "SELECT id, title, icon FROM documents WHERE is_active = 1 ORDER BY order_num",
+  );
+
+  if (docs.length === 0) {
+    await ctx.editMessageText("📭 Нет документов для редактирования", {
+      reply_markup: new InlineKeyboard().text("⬅️ Назад", "menu:documents"),
+    });
+    return;
+  }
+
+  const kb = new InlineKeyboard();
+  docs.forEach((doc) => {
+    kb.text(`${doc.icon} ${doc.title}`, `doc:edit_select:${doc.id}`).row();
+  });
+  kb.row().text("⬅️ Назад", "menu:documents");
+
+  await ctx.editMessageText("✏️ *Выбери документ для редактирования:*", {
+    parse_mode: "Markdown",
+    reply_markup: kb,
+  });
+});
+
+bot.callbackQuery("documents:delete", requireAdmin, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  setSession(ctx.from.id, { entity: "document_delete", step: "id" });
+  await ctx.editMessageText(
+    "❌ Введи *ID документа* для удаления:\n(команда /menu для отмены)",
+    { parse_mode: "Markdown" },
+  );
+});
+
+bot.callbackQuery(/^doc:edit_select:(\d+)$/, requireAdmin, async (ctx) => {
+  const docId = parseInt(ctx.match[1]);
+  const doc = await db.get("SELECT * FROM documents WHERE id = ?", [docId]);
+
+  if (!doc) {
+    await ctx.answerCallbackQuery("Документ не найден");
+    return;
+  }
+
+  const kb = new InlineKeyboard()
+    .text("✏️ Название", `doc:edit_field:${docId}:title`)
+    .text("🎨 Иконку", `doc:edit_field:${docId}:icon`)
+    .row()
+    .text("📝 Содержание", `doc:edit_field:${docId}:content`)
+    .text("📎 Загрузить файл", `doc:edit_field:${docId}:file_url`)
+    .row()
+    .text("🔢 Порядок", `doc:edit_field:${docId}:order_num`)
+    .text("🟢/🔴 Активность", `doc:edit_field:${docId}:is_active`)
+    .row()
+    .text("⬅️ Назад", "menu:documents");
+
+  const hasFile = doc.file_url ? "✅ Да" : "❌ Нет";
+  const msg =
+    `✏️ *Редактирование документа #${doc.id}*\n\n` +
+    `📌 Название: ${doc.title}\n` +
+    `🎨 Иконка: ${doc.icon}\n` +
+    `📝 Содержание: ${doc.content ? doc.content.slice(0, 50) + "..." : "не задано"}\n` +
+    `📎 Файл: ${hasFile}\n` +
+    `🔢 Порядок: ${doc.order_num}\n` +
+    `🟢 Активен: ${doc.is_active ? "да" : "нет"}\n\n` +
+    `Что хочешь изменить?`;
+
+  await ctx.editMessageText(msg, {
+    parse_mode: "Markdown",
+    reply_markup: kb,
+  });
+});
+
+bot.callbackQuery(/^doc:edit_field:(\d+):(\w+)$/, requireAdmin, async (ctx) => {
+  const docId = parseInt(ctx.match[1]);
+  const field = ctx.match[2];
+
+  const fieldNames = {
+    title: "название",
+    icon: "иконку (один emoji)",
+    content: "содержание документа (текст или HTML)",
+    file_url: "файл (PDF, DOCX, DOC)",
+    order_num: "порядковый номер (число)",
+    is_active: "статус (1 - активен, 0 - неактивен)",
+  };
+
+  if (field === "file_url") {
+    setSession(ctx.from.id, {
+      entity: "document_file_upload",
+      step: "waiting_for_file",
+      data: { docId, field },
+    });
+
+    await ctx.editMessageText(
+      `📎 *Загрузка файла для документа #${docId}*\n\n` +
+        `Отправь файл в одном из форматов:\n` +
+        `• PDF - документы\n` +
+        `• DOCX/DOC - документы Word\n\n` +
+        `Файл будет автоматически сохранён и привязан к документу.\n\n` +
+        `(команда /menu для отмены)`,
+      { parse_mode: "Markdown" },
+    );
+    return;
+  }
+
+  setSession(ctx.from.id, {
+    entity: "document_edit",
+    step: "value",
+    data: { docId, field },
+  });
+
+  await ctx.editMessageText(
+    `✏️ Введи новое *${fieldNames[field]}* для документа #${docId}:\n(команда /menu для отмены)`,
     { parse_mode: "Markdown" },
   );
 });
@@ -696,7 +923,16 @@ bot.on("message:text", requireAdmin, async (ctx) => {
     return;
   }
 
-  // Удаления
+  if (session.entity === "document") {
+    await handleDocumentStep(ctx, session, text);
+    return;
+  }
+
+  if (session.entity === "document_edit") {
+    await handleDocumentEdit(ctx, session, text);
+    return;
+  }
+
   const deleteHandlers = {
     event_delete: () => deleteEntity(ctx, "events", text),
     teacher_delete: () => deleteEntity(ctx, "teachers", text),
@@ -704,11 +940,39 @@ bot.on("message:text", requireAdmin, async (ctx) => {
     room_delete: () => deleteEntity(ctx, "rooms", text),
     contact_delete: () => deleteEntity(ctx, "contacts", text),
     review_delete: () => deleteEntity(ctx, "reviews", text),
+    document_delete: () => deleteEntity(ctx, "documents", text),
   };
 
   if (deleteHandlers[session.entity]) {
     await deleteHandlers[session.entity]();
   }
+});
+
+// Обработка загрузки файлов для документов
+bot.on("message:document", requireAdmin, async (ctx) => {
+  const session = getSession(ctx.from.id);
+
+  if (session && session.entity === "document_file_upload") {
+    const { docId } = session.data;
+
+    const fileUrl = await saveDocumentFile(ctx, docId);
+    if (fileUrl) {
+      await db.run(
+        `UPDATE documents SET file_url = ?, updated_at = datetime('now') WHERE id = ?`,
+        [fileUrl, docId],
+      );
+      clearSession(ctx.from.id);
+      await ctx.reply(`✅ Файл загружен и привязан к документу #${docId}!`, {
+        reply_markup: new InlineKeyboard().text(
+          "⬅️ К документам",
+          "menu:documents",
+        ),
+      });
+    }
+    return;
+  }
+
+  await ctx.reply("Нет активного диалога для загрузки файла. Используй /menu");
 });
 
 async function deleteEntity(ctx, table, text) {
@@ -725,6 +989,7 @@ async function deleteEntity(ctx, table, text) {
     rooms: "Кабинет",
     contacts: "Заявка",
     reviews: "Отзыв",
+    documents: "Документ",
   };
 
   const row = await db.get(`SELECT * FROM ${table} WHERE id = ?`, [id]);
@@ -739,6 +1004,15 @@ async function deleteEntity(ctx, table, text) {
       __dirname,
       "public",
       row.image_url.replace("/static/", ""),
+    );
+    if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
+  }
+
+  if (row.file_url && table === "documents") {
+    const filepath = path.join(
+      __dirname,
+      "public",
+      row.file_url.replace("/static/", ""),
     );
     if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
   }
@@ -1102,6 +1376,123 @@ async function saveRoom(ctx, data, imageUrl) {
 }
 
 // ══════════════════════════════════════════════════════════
+//  ПОШАГОВЫЙ ВВОД — ДОКУМЕНТ
+// ══════════════════════════════════════════════════════════
+
+async function handleDocumentStep(ctx, session, text) {
+  const { step, data } = session;
+
+  if (step === "title") {
+    data.title = text;
+    session.step = "icon";
+    setSession(ctx.from.id, session);
+    await ctx.reply(
+      "Шаг 2/4 — Введи *иконку* документа (один emoji, например 📄):",
+      {
+        parse_mode: "Markdown",
+      },
+    );
+    return;
+  }
+
+  if (step === "icon") {
+    const emojiRegex = /\p{Emoji}/u;
+    if (!emojiRegex.test(text)) {
+      await ctx.reply(
+        "❌ Пожалуйста, введи emoji иконку (например: 📄, 📖, 🕒)",
+      );
+      return;
+    }
+    data.icon = text;
+    session.step = "content";
+    setSession(ctx.from.id, session);
+    await ctx.reply(
+      "Шаг 3/4 — Введи *содержание* документа (текст или HTML)\n(или отправь '-' чтобы пропустить):",
+      { parse_mode: "Markdown" },
+    );
+    return;
+  }
+
+  if (step === "content") {
+    data.content = text === "-" ? null : text;
+    session.step = "order_num";
+    setSession(ctx.from.id, session);
+    await ctx.reply(
+      "Шаг 4/4 — Введи *порядковый номер* (число, чем меньше - тем выше в списке):\n(или '-' для 0):",
+      { parse_mode: "Markdown" },
+    );
+    return;
+  }
+
+  if (step === "order_num") {
+    const orderNum = text === "-" ? 0 : parseInt(text);
+    data.order_num = isNaN(orderNum) ? 0 : orderNum;
+    await saveDocument(ctx, data);
+  }
+}
+
+async function saveDocument(ctx, data) {
+  try {
+    const result = await db.run(
+      `INSERT INTO documents (title, icon, content, order_num, is_active, created_at, updated_at) 
+       VALUES (?, ?, ?, ?, 1, datetime('now'), datetime('now'))`,
+      [data.title, data.icon, data.content, data.order_num],
+    );
+    clearSession(ctx.from.id);
+    await ctx.reply(
+      `✅ *Документ добавлен!*\n\n` +
+        `🆔 ID: ${result.lastID}\n` +
+        `${data.icon} ${data.title}\n` +
+        `🔢 Порядок: ${data.order_num}` +
+        (data.content ? `\n📝 Содержание: добавлено` : ""),
+      {
+        parse_mode: "Markdown",
+        reply_markup: new InlineKeyboard().text(
+          "⬅️ К документам",
+          "menu:documents",
+        ),
+      },
+    );
+  } catch (err) {
+    console.error(err);
+    await ctx.reply("❌ Ошибка при сохранении документа");
+  }
+}
+
+async function handleDocumentEdit(ctx, session, text) {
+  const { docId, field } = session.data;
+
+  let value = text;
+  if (field === "order_num") {
+    value = parseInt(text);
+    if (isNaN(value)) {
+      await ctx.reply("❌ Введи число!");
+      return;
+    }
+  }
+  if (field === "is_active") {
+    value = parseInt(text) === 1 ? 1 : 0;
+  }
+
+  try {
+    await db.run(
+      `UPDATE documents SET ${field} = ?, updated_at = datetime('now') WHERE id = ?`,
+      [value, docId],
+    );
+    clearSession(ctx.from.id);
+    await ctx.reply(`✅ Поле "${field}" обновлено для документа #${docId}!`, {
+      reply_markup: new InlineKeyboard().text(
+        "⬅️ К документам",
+        "menu:documents",
+      ),
+    });
+  } catch (err) {
+    console.error(err);
+    await ctx.reply("❌ Ошибка при обновлении");
+  }
+}
+
+// ══════════════════════════════════════════════════════════
 //  ОБРАБОТКА ФОТО
 // ══════════════════════════════════════════════════════════
 
@@ -1250,17 +1641,15 @@ async function startBot() {
     return;
   }
   try {
-    const me = await bot.api.getMe();
-    console.log(`✅ Бот @${me.username} запущен`);
     if (process.env.ADMIN_TELEGRAM_ID) {
       console.log(`👑 Admin ID: ${process.env.ADMIN_TELEGRAM_ID}`);
     }
     bot.start();
+    console.log("✅ Telegram бот запущен");
   } catch (error) {
     console.error("❌ Ошибка запуска бота:", error.message);
   }
 }
 
-startBot();
-
 module.exports = { bot, notifyNewContact, notifyNewReview };
+startBot();

@@ -13,16 +13,16 @@ const eventsRouter = require("./routes/events");
 const teachersRouter = require("./routes/teachers");
 const reviewsRouter = require("./routes/reviews");
 const winsRouter = require("./routes/wins");
-const newsRouter = require("./routes/news");
 const contactRouter = require("./routes/contact");
 const roomsRouter = require("./routes/rooms");
+const documentsRouter = require("./routes/documents");
 const dataRouter = require("./routes/data");
 const { errorHandler } = require("./middleware/errorHandler");
 
 // ── CORS ──
 const allowedOrigins = [
   process.env.FRONTEND_URL,
-  "https://diplom-iota-eight.vercel.app",
+  "http://80.93.62.55",
   "http://localhost:4173",
   "http://localhost:5173",
 ].filter(Boolean);
@@ -30,7 +30,6 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
-      // разрешаем curl / Postman / мобильные (origin = undefined)
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
@@ -41,8 +40,6 @@ app.use(
 );
 
 app.use(express.json());
-
-// ── Статика (картинки) ──
 app.use("/static", express.static(path.join(__dirname, "public")));
 
 // ── API роуты ──
@@ -50,9 +47,9 @@ app.use("/api/events", eventsRouter);
 app.use("/api/teachers", teachersRouter);
 app.use("/api/reviews", reviewsRouter);
 app.use("/api/wins", winsRouter);
-app.use("/api/news", newsRouter);
 app.use("/api/contact", contactRouter);
 app.use("/api/rooms", roomsRouter);
+app.use("/api/documents", documentsRouter);
 app.use("/api", dataRouter);
 
 // ── Healthcheck для Railway ──
@@ -68,9 +65,9 @@ app.get("/api/health", (_req, res) =>
 app.use(errorHandler);
 
 // ── Запуск ──
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
+  // '0.0.0.0' важно!
   console.log(`✅ Сервер запущен на порту ${PORT}`);
-  console.log(`   CORS разрешён для: ${allowedOrigins.join(", ")}`);
 });
 
 // ── Telegram-бот (опционально) ──

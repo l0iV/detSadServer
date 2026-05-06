@@ -16,8 +16,12 @@ class Database {
       }
       console.log("✅ SQLite подключена:", filePath);
     });
-    this._db.run("PRAGMA journal_mode = WAL");
-    this._db.run("PRAGMA foreign_keys = ON");
+
+    this._db.configure("busyTimeout", 5000);
+    this._db.serialize(() => {
+      this._db.run("PRAGMA journal_mode = WAL");
+      this._db.run("PRAGMA foreign_keys = ON");
+    });
   }
 
   /** SELECT — возвращает массив строк */
@@ -63,9 +67,8 @@ class Database {
 
 const db = new Database(DB_PATH);
 
-// Создание всех 7 таблиц при старте
-db.exec(
-  `
+// Создание таблиц при старте
+const initSchema = `
   CREATE TABLE IF NOT EXISTS events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     title       TEXT    NOT NULL,
@@ -119,11 +122,23 @@ db.exec(
     image_url   TEXT,
     created_at  TEXT    DEFAULT (datetime('now'))
   );
-`,
-)
+CREATE TABLE IF NOT EXISTS documents (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  title       TEXT    NOT NULL,
+  icon        TEXT    NOT NULL,
+  content     TEXT,           -- для хранения HTML-содержимого или текста
+  file_url    TEXT,           -- для PDF/документов
+  order_num   INTEGER DEFAULT 0,
+  is_active   INTEGER DEFAULT 1,
+  created_at  TEXT    DEFAULT (datetime('now')),
+  updated_at  TEXT    DEFAULT (datetime('now'))
+);
+`;
+
+db.exec(initSchema)
   .then(() =>
     console.log(
-      "✅ Все 7 таблиц готовы (events, teachers, reviews, contacts, wins, rooms)",
+      "✅ Все таблицы готовы (events, teachers, reviews, contacts, wins, rooms,documents)",
     ),
   )
   .catch((err) => console.error("❌ Ошибка создания таблиц:", err.message));
